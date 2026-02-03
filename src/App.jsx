@@ -11,7 +11,11 @@ import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   onAuthStateChanged, 
-  signInAnonymously
+  signInAnonymously,
+  createUserWithEmailAndPassword,  // ADD
+  signInWithEmailAndPassword,      // ADD
+  signOut,                         // ADD
+  updateProfile                    // ADD
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -23,7 +27,9 @@ import {
   doc, 
   deleteDoc, 
   updateDoc,
-  serverTimestamp 
+  serverTimestamp,
+  setDoc,      // ADD
+  getDoc       // ADD
 } from 'firebase/firestore';
 
 // --- Firebase Setup ---
@@ -169,10 +175,11 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
 
   const getDatesForDay = (day) => {
     return dates.filter(d => {
-      const date = new Date(d.date); 
-      return date.getDate() === day && 
-             date.getMonth() === currentDate.getMonth() && 
-             date.getFullYear() === currentDate.getFullYear();
+      // Parse the date string directly to avoid timezone issues
+      const [year, month, dayOfMonth] = d.date.split('-').map(Number);
+      return dayOfMonth === day && 
+             (month - 1) === currentDate.getMonth() && 
+             year === currentDate.getFullYear();
     });
   };
 
@@ -391,6 +398,324 @@ const SummaryTab = ({ dates, onSelectDate }) => {
     </div>
   );
 };
+
+
+// Profile Tab - allow user to create profile
+// Profile Tab
+const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
+  const [view, setView] = useState(user?.isAnonymous ? 'upgrade' : 'profile');
+  const [isSignup, setIsSignup] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Editing profile state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(userProfile?.name || '');
+  const [editBio, setEditBio] = useState(userProfile?.bio || '');
+  const [editPhoto, setEditPhoto] = useState(userProfile?.photo || null);
+  const fileInputRef = useRef(null);
+
+  const handlePhotoUpload = async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      try {
+        const base64 = await resizeImage(e.target.files[0]);
+        setEditPhoto(base64);
+      } catch (err) {
+        console.error("Image processing failed", err);
+        alert("Could not process image.");
+      }
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      await onUpdateProfile({ name: editName, bio: editBio, photo: editPhoto });
+      setIsEditing(false);
+    } catch (e) {
+      console.error("Error saving profile", e);
+    }
+  };
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (isSignup) {
+        // Sign up new user
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName: name });
+        
+        // Create user profile in Firestore
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          name: name,
+          email: email,
+          createdAt: serverTimestamp()
+        });
+        
+        alert('Account created! Please log your first date.');
+        setView('profile');
+      } else {
+        // Log in existing user
+        await signInWithEmailAndPassword(auth, email, password);
+        alert('Welcome back!');
+        setView('profile');
+      }
+    } catch (err) {
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Try logging in instead.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setError('Invalid email or password.');
+      } else {
+        setError(err.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (confirm("Are you sure you want to log out?")) {
+      try {
+        await signOut(auth);
+        alert('You have been logged out.');
+      } catch (e) {
+        console.error("Logout error", e);
+      }
+    }
+  };
+
+  // If editing profile
+  if (isEditing) {
+    return (
+      <div className="h-full bg-gray-50 overflow-y-auto pb-20">
+        <div className="bg-white sticky top-0 z-10 px-4 py-4 shadow-sm flex justify-between items-center">
+          <button onClick={() => setIsEditing(false)} className="text-gray-500 font-medium">Cancel</button>
+          <h2 className="font-bold text-lg">Edit Profile</h2>
+          <button onClick={handleSaveProfile} className="text-rose-600 font-bold">Save</button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          <div className="flex flex-col items-center">
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className="w-32 h-32 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 overflow-hidden mb-4"
+            >
+              {editPhoto ? (
+                <img src={editPhoto} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <>
+                  <Camera size={32} className="mb-2" />
+                  <span className="text-sm">Upload Photo</span>
+                </>
+              )}
+            </div>
+            <input type="file" ref={fileInputRef} onChange={handlePhotoUpload} accept="image/*" className="hidden" />
+          </div>
+
+          <div className="bg-white p-4 rounded-xl shadow-sm space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Name</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full p-3 bg-gray-50 rounded-lg border-none focus:ring-2 focus:ring-rose-200"
+                placeholder="Your name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Bio</label>
+              <textarea
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                className="w-full p-3 bg-gray-50 rounded-lg border-none focus:ring-2 focus:ring-rose-200 h-32 resize-none"
+                placeholder="Tell us about yourself..."
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If anonymous user - show upgrade prompt
+  if (view === 'upgrade') {
+    return (
+      <div className="h-full bg-gray-50 overflow-y-auto pb-20">
+        <div className="px-6 pt-8 pb-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Create Your Account</h2>
+          <p className="text-sm text-gray-500">Save your data across devices with an email account</p>
+        </div>
+
+        <div className="px-6 space-y-4">
+          <div className="bg-gradient-to-r from-rose-500 to-pink-500 p-1 rounded-xl">
+            <div className="bg-white p-4 rounded-lg">
+              <h3 className="font-bold text-gray-800 mb-2">Why create an account?</h3>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li className="flex items-start gap-2">
+                  <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+                  <span>Access your dates from any device</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+                  <span>Never lose your data</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+                  <span>Secure cloud backup</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setIsSignup(true)}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${isSignup ? 'bg-rose-500 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}
+            >
+              Sign Up
+            </button>
+            <button
+              onClick={() => setIsSignup(false)}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${!isSignup ? 'bg-rose-500 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}
+            >
+              Log In
+            </button>
+          </div>
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            {isSignup && (
+              <input
+                type="text"
+                placeholder="Your Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-rose-200 focus:border-transparent"
+                required
+              />
+            )}
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-rose-200 focus:border-transparent"
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password (min 6 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-rose-200 focus:border-transparent"
+              required
+              minLength={6}
+            />
+            
+            {error && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-600 text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold shadow-lg hover:bg-rose-600 transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Please wait...' : (isSignup ? 'Create Account' : 'Log In')}
+            </button>
+          </form>
+
+          <div className="text-center">
+            <button
+              onClick={() => setView('profile')}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Continue as anonymous user
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Regular profile view for logged-in users
+  return (
+    <div className="h-full bg-gray-50 overflow-y-auto pb-20 pt-8">
+      <div className="px-6 mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Profile</h2>
+        <p className="text-sm text-gray-500">Manage your account</p>
+      </div>
+
+      <div className="px-6 space-y-6">
+        <div className="bg-white rounded-xl p-6 shadow-sm text-center">
+          <div className="w-24 h-24 mx-auto rounded-full bg-gray-100 flex items-center justify-center text-3xl mb-4 overflow-hidden border-4 border-white shadow-lg">
+            {userProfile?.photo ? (
+              <img src={userProfile.photo} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-12 h-12 text-gray-400" />
+            )}
+          </div>
+          <h3 className="text-xl font-bold text-gray-800">{userProfile?.name || user?.displayName || 'Anonymous User'}</h3>
+          {user?.email && <p className="text-sm text-gray-500 mt-1">{user.email}</p>}
+          {!user?.email && <p className="text-sm text-gray-500 mt-1">Anonymous account</p>}
+          {userProfile?.bio && (
+            <p className="text-sm text-gray-600 mt-4 leading-relaxed">{userProfile.bio}</p>
+          )}
+        </div>
+
+        {user?.email && (
+          <button
+            onClick={() => setIsEditing(true)}
+            className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-colors"
+          >
+            Edit Profile
+          </button>
+        )}
+
+        {user?.isAnonymous && (
+          <button
+            onClick={() => setView('upgrade')}
+            className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-colors"
+          >
+            Create Account
+          </button>
+        )}
+
+        {user?.email && (
+          <button
+            onClick={handleLogout}
+            className="w-full py-4 bg-white text-gray-600 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+          >
+            <Lock size={20} />
+            Log Out
+          </button>
+        )}
+
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <h4 className="text-sm font-bold text-gray-700 mb-3">About This App</h4>
+          <p className="text-sm text-gray-600 leading-relaxed">
+          DatingToday helps you track, reflect, and learn from your dating experiences. Keep a private journal of your dates, spot patterns, and date more mindfully.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+
+
 
 // 4. Add/Edit Date Form
 const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
@@ -826,26 +1151,43 @@ const PremiumScreen = ({ type, onUpgrade, onCancel, showTabs, dates = [] }) => {
 };
 
 // 7. Main Screen Wrapper
-const MainScreen = ({ dates, onSelectDate, onAddDate, activeTab, onTabChange, onOpenAI, isPremium, onUpgrade }) => {
+const MainScreen = ({ 
+  dates, 
+  onSelectDate, 
+  onAddDate, 
+  activeTab, 
+  onTabChange, 
+  onOpenAI, 
+  isPremium, 
+  onUpgrade,
+  user,              // ADD
+  userProfile,       // ADD
+  onUpdateProfile    // ADD
+}) => {
   return (
     <div className="h-full flex flex-col bg-gray-50">
       <div className="flex-1 overflow-hidden relative">
         {activeTab === 'journey' && <JourneyTab dates={dates} onSelectDate={onSelectDate} onAddDate={onAddDate} onOpenAI={onOpenAI} />}
         {activeTab === 'summary' && <SummaryTab dates={dates} onSelectDate={onSelectDate} />}
         {activeTab === 'expert' && <PremiumScreen type="expert" onUpgrade={onUpgrade} showTabs={true} dates={dates} />}
+        {activeTab === 'profile' && <ProfileTab user={user} userProfile={userProfile} onUpdateProfile={onUpdateProfile} />}
       </div>
       <div className="h-20 bg-white border-t border-gray-100 flex items-center justify-around px-2 z-30 pb-2">
-        <button onClick={() => onTabChange('journey')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-20 ${activeTab === 'journey' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
+        <button onClick={() => onTabChange('journey')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-16 ${activeTab === 'journey' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
           <Home size={24} className="mb-1" strokeWidth={activeTab === 'journey' ? 2.5 : 2} />
           <span className="text-[10px] font-medium">Journey</span>
         </button>
-        <button onClick={() => onTabChange('summary')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-20 ${activeTab === 'summary' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
+        <button onClick={() => onTabChange('summary')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-16 ${activeTab === 'summary' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
           <List size={24} className="mb-1" strokeWidth={activeTab === 'summary' ? 2.5 : 2} />
           <span className="text-[10px] font-medium">Summary</span>
         </button>
-        <button onClick={() => onTabChange('expert')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-20 ${activeTab === 'expert' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}>
+        <button onClick={() => onTabChange('expert')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-16 ${activeTab === 'expert' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}>
           <MessageCircle size={24} className="mb-1" strokeWidth={activeTab === 'expert' ? 2.5 : 2} />
           <span className="text-[10px] font-medium">Expert</span>
+        </button>
+        <button onClick={() => onTabChange('profile')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-16 ${activeTab === 'profile' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
+          <User size={22} className="mb-1" strokeWidth={activeTab === 'profile' ? 2.5 : 2} />
+          <span className="text-[10px] font-medium">Profile</span>
         </button>
       </div>
     </div>
@@ -861,6 +1203,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [paywallType, setPaywallType] = useState('limit');
   const [isPremium, setIsPremium] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
 
   // Dynamic viewport height fix for Chrome
   useEffect(() => {
@@ -901,6 +1244,25 @@ export default function App() {
     }, (error) => console.error("Error fetching dates:", error));
     return () => unsubscribe();
   }, [user, currentView]);
+   
+  // add for profile
+  useEffect(() => {
+    if (!user) return;
+    
+    // Load user profile from Firestore
+    const loadProfile = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'users', user.uid));
+        if (docSnap.exists()) {
+          setUserProfile(docSnap.data());
+        }
+      } catch (e) {
+        console.error("Error loading profile", e);
+      }
+    };
+    
+    loadProfile();
+  }, [user]);
 
   const handleWelcomeAnswer = (hasDated) => {
     if (hasDated) setCurrentView('add');
@@ -969,11 +1331,45 @@ export default function App() {
     setCurrentView('edit');
   };
 
+  // add for profile
+  const handleUpdateProfile = async (profileData) => {
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        ...profileData,
+        email: user.email,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      
+      if (profileData.name && user) {
+        await updateProfile(user, { displayName: profileData.name });
+      }
+      
+      setUserProfile({ ...profileData, email: user.email });
+    } catch (e) {
+      console.error("Error updating profile", e);
+      alert("Could not save profile. Please try again.");
+    }
+  };
+  
   const renderContent = () => {
     if (!user) return <div className="flex items-center justify-center h-full text-rose-500">Loading...</div>;
     switch (currentView) {
       case 'welcome': return <WelcomeScreen onAnswer={handleWelcomeAnswer} />;
-      case 'main': return <MainScreen dates={dates} onSelectDate={(d) => { setSelectedDate(d); setCurrentView('detail'); }} onAddDate={() => setCurrentView('add')} activeTab={activeTab} onTabChange={setActiveTab} onOpenAI={handleOpenAI} isPremium={isPremium} onUpgrade={handleUpgrade} />;
+      case 'main': return (
+        <MainScreen 
+          dates={dates} 
+          onSelectDate={(d) => { setSelectedDate(d); setCurrentView('detail'); }} 
+          onAddDate={() => setCurrentView('add')} 
+          activeTab={activeTab} 
+          onTabChange={setActiveTab} 
+          onOpenAI={handleOpenAI} 
+          isPremium={isPremium} 
+          onUpgrade={handleUpgrade}
+          user={user} // add
+          userProfile={userProfile} // add
+          onUpdateProfile={handleUpdateProfile} // add
+        />
+      );
       case 'add': return <DateForm onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} />;
       case 'edit': return <DateForm initialData={selectedDate} onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} />;
       case 'detail': return selectedDate ? <DateDetail data={selectedDate} onBack={() => setCurrentView('main')} onDelete={handleDeleteDate} onEndDating={handleEndDating} onEdit={handleEdit} /> : null;
