@@ -154,7 +154,56 @@ const WelcomeScreen = ({ onAnswer }) => (
   </div>
 );
 
-// 2. Journey Tab (Calendar + Active Dates)
+
+// 2. Scheduled Date Reminder Screen
+const ScheduledDateReminderScreen = ({ scheduledDate, onLogDate, onSkip }) => (
+  <div className="flex flex-col items-center justify-center h-full p-6 bg-gradient-to-b from-blue-50 to-white text-center">
+    <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-6 shadow-sm">
+      <Clock className="w-10 h-10 text-blue-500" />
+    </div>
+    <h1 className="text-3xl font-bold text-gray-800 mb-2">How was your date?</h1>
+    <p className="text-gray-500 mb-4">You had a scheduled date with</p>
+    
+    <div className="bg-white rounded-xl p-4 shadow-sm mb-8 w-full max-w-sm">
+      <div className="flex items-center gap-3">
+        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center text-2xl font-bold text-gray-600 overflow-hidden">
+          {scheduledDate.photo ? (
+            <img src={scheduledDate.photo} alt={scheduledDate.name} className="w-full h-full object-cover" />
+          ) : (
+            <span>{scheduledDate.name ? scheduledDate.name[0].toUpperCase() : '?'}</span>
+          )}
+        </div>
+        <div className="flex-1 text-left">
+          <h3 className="text-xl font-bold text-gray-800">{scheduledDate.name}</h3>
+          {scheduledDate.title && <p className="text-sm text-gray-500">{scheduledDate.title}</p>}
+          <p className="text-sm text-blue-600 mt-1">
+            {new Date(scheduledDate.date).toLocaleDateString()} at {scheduledDate.time}
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="w-full max-w-sm space-y-4">
+      <button 
+        onClick={onLogDate}
+        className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-blue-600 transition-transform active:scale-95"
+      >
+        Yes! Log that date
+      </button>
+      <button 
+        onClick={onSkip}
+        className="w-full py-4 bg-white text-gray-600 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+      >
+        No, take me to calendar
+      </button>
+    </div>
+  </div>
+);
+
+
+
+
+// 3. Journey Tab (Calendar + Active Dates)
 const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -331,7 +380,7 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
   );
 };
 
-// 3. Summary List Tab
+// 4. Summary List Tab
 const SummaryTab = ({ dates, onSelectDate }) => {
   const upcoming = dates.filter(d => isFutureDate(d.date, d.time));
   const past = dates.filter(d => !isFutureDate(d.date, d.time));
@@ -400,8 +449,7 @@ const SummaryTab = ({ dates, onSelectDate }) => {
 };
 
 
-// Profile Tab - allow user to create profile
-// Profile Tab
+// 5. Profile Tab - allow user to create profile
 const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
   const [view, setView] = useState(user?.isAnonymous ? 'upgrade' : 'profile');
   const [isSignup, setIsSignup] = useState(true);
@@ -714,11 +762,8 @@ const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
 };
 
 
-
-
-
-// 4. Add/Edit Date Form
-const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
+// 6. Add/Edit Date Form
+const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] }) => {
   const [formData, setFormData] = useState(initialData || {
     date: new Date().toLocaleDateString('en-CA'),
     time: new Date().toTimeString().slice(0, 5),
@@ -735,9 +780,25 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
     nextStep: 'Unsure'
   });
 
+  const [showDropdown, setShowDropdown] = useState(false);
   const fileInputRef = useRef(null);
   const isFuture = isFutureDate(formData.date, formData.time);
   const isEditing = !!initialData?.id;
+
+  // Get unique active dates (people who aren't ended)
+  const activePeople = useMemo(() => {
+    const latestByPerson = {};
+    existingDates.forEach(d => {
+      if (!d.name) return;
+      const normalizedName = d.name.trim().toLowerCase();
+      if (!latestByPerson[normalizedName] || new Date(d.date) > new Date(latestByPerson[normalizedName].date)) {
+        latestByPerson[normalizedName] = d;
+      }
+    });
+    
+    // Filter out people who have been ended
+    return Object.values(latestByPerson).filter(person => person.nextStep !== 'End');
+  }, [existingDates]);
 
   const toggleTag = (tag) => {
     setFormData(prev => ({
@@ -763,6 +824,19 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave(formData);
+  };
+
+  // Handle selecting a person from the dropdown
+  const handleSelectPerson = (person) => {
+    setFormData(prev => ({
+      ...prev,
+      name: person.name,
+      title: person.title || '',
+      link: person.link || '',
+      photo: person.photo || null,
+      // Don't auto-fill scenario, feeling, tags, diary, nextStep - those are specific to this date
+    }));
+    setShowDropdown(false);
   };
 
   return (
@@ -824,12 +898,56 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
             <input type="file" ref={fileInputRef} onChange={handlePhotoUpload} accept="image/*" className="hidden" />
             
             <div className="flex-1 space-y-2">
-              <input 
-                placeholder="Name / Nickname"
-                value={formData.name}
-                onChange={e => setFormData({...formData, name: e.target.value})}
-                className="w-full p-3 bg-gray-50 rounded-lg border-none focus:ring-2 focus:ring-rose-200"
-              />
+              {/* Name input with dropdown */}
+              <div className="relative">
+                <div className="flex gap-2">
+                  <input 
+                    placeholder="Name / Nickname"
+                    value={formData.name}
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    className="flex-1 p-3 bg-gray-50 rounded-lg border-none focus:ring-2 focus:ring-rose-200"
+                  />
+                  {activePeople.length > 0 && !isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDropdown(!showDropdown)}
+                      className="px-3 bg-gray-50 rounded-lg border-none hover:bg-gray-100 transition-colors flex items-center gap-1"
+                    >
+                      <List size={18} className="text-gray-500" />
+                    </button>
+                  )}
+                </div>
+                
+                {/* Dropdown menu */}
+                {showDropdown && activePeople.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
+                    <div className="p-2">
+                      <p className="text-xs font-bold text-gray-400 uppercase px-2 py-1">Select from active dates</p>
+                      {activePeople.map((person, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSelectPerson(person)}
+                          className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg transition-colors"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600 overflow-hidden shrink-0">
+                            {person.photo ? (
+                              <img src={person.photo} alt={person.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{person.name[0].toUpperCase()}</span>
+                            )}
+                          </div>
+                          <div className="flex-1 text-left">
+                            <p className="font-semibold text-gray-800 text-sm">{person.name}</p>
+                            {person.title && <p className="text-xs text-gray-500">{person.title}</p>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
               <input 
                 placeholder="Title (e.g. The Architect)"
                 value={formData.title}
@@ -864,6 +982,7 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
               return (
                 <button
                   key={s.id}
+                  type="button"
                   onClick={() => setFormData({...formData, scenario: s.id})}
                   className={`flex flex-col items-center p-3 rounded-lg border w-20 h-20 justify-center gap-1 transition-all ${isSelected ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-gray-100 text-gray-400'}`}
                 >
@@ -888,6 +1007,7 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
                 return (
                   <button
                     key={key}
+                    type="button"
                     onClick={() => setFormData({...formData, feeling: key})}
                     className={`flex flex-col items-center py-2 rounded-lg transition-all ${isSelected ? 'ring-2 ring-offset-1 ring-gray-400 scale-105' : 'opacity-60 grayscale'}`}
                   >
@@ -909,6 +1029,7 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
               {TAGS.map(tag => (
                 <button
                   key={tag}
+                  type="button"
                   onClick={() => toggleTag(tag)}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${formData.tags.includes(tag) ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200'}`}
                 >
@@ -931,6 +1052,7 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
                  return (
                    <button
                      key={step.id}
+                     type="button"
                      onClick={() => setFormData({...formData, nextStep: step.id})}
                      className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all ${isSelected ? step.color : 'border-gray-100 text-gray-400 bg-white'}`}
                    >
@@ -988,7 +1110,9 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI }) => {
   );
 };
 
-// 5. Date Detail View
+
+
+// 7. Date Detail View
 const DateDetail = ({ data, onBack, onDelete, onEndDating, onEdit }) => {
   const isFuture = isFutureDate(data.date, data.time);
   const feeling = isFuture ? SCHEDULED_THEME : (FEELINGS[data.feeling] || FEELINGS.OKAY);
@@ -1091,7 +1215,7 @@ const DateDetail = ({ data, onBack, onDelete, onEndDating, onEdit }) => {
   );
 };
 
-// 6. Paywall / Premium Screen
+// 8. Paywall / Premium Screen
 const PremiumScreen = ({ type, onUpgrade, onCancel, showTabs, dates = [] }) => {
   const stats = useMemo(() => {
     if (!dates.length) return null;
@@ -1150,7 +1274,7 @@ const PremiumScreen = ({ type, onUpgrade, onCancel, showTabs, dates = [] }) => {
   );
 };
 
-// 7. Main Screen Wrapper
+// 9. Main Screen Wrapper
 const MainScreen = ({ 
   dates, 
   onSelectDate, 
@@ -1204,6 +1328,8 @@ export default function App() {
   const [paywallType, setPaywallType] = useState('limit');
   const [isPremium, setIsPremium] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
+  const [scheduledDateToLog, setScheduledDateToLog] = useState(null);
+
 
   // Dynamic viewport height fix for Chrome
   useEffect(() => {
@@ -1237,9 +1363,19 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const datesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setDates(datesData);
+      
       if (currentView === 'loading') {
-        if (datesData.length === 0) setCurrentView('welcome');
-        else setCurrentView('main');
+        // Check for past scheduled dates first
+        const pastScheduled = checkForPastScheduledDates(datesData);
+        
+        if (pastScheduled) {
+          setScheduledDateToLog(pastScheduled);
+          setCurrentView('scheduled-reminder');
+        } else if (datesData.length === 0) {
+          setCurrentView('welcome');
+        } else {
+          setCurrentView('main');
+        }
       }
     }, (error) => console.error("Error fetching dates:", error));
     return () => unsubscribe();
@@ -1351,9 +1487,58 @@ export default function App() {
     }
   };
   
+  // add for scheduled date ask page
+  const handleLogScheduledDate = () => {
+    // Pre-fill the form with the scheduled date info
+    setSelectedDate(scheduledDateToLog);
+    setScheduledDateToLog(null);
+    setCurrentView('edit'); // Use 'edit' view to pre-fill the form
+  };
+  
+  const handleSkipScheduledDate = () => {
+    setScheduledDateToLog(null);
+    setCurrentView('main');
+  };
+
+
+  // add for date reminder welcome page
+  const checkForPastScheduledDates = (datesData) => {
+    // Find scheduled dates that have now passed
+    const now = new Date();
+    const pastScheduledDates = datesData.filter(d => {
+      // Must be a scheduled date (was in the future when created)
+      // And must have a feeling of 'OKAY' still (meaning it hasn't been updated after the date)
+      // And the date has now passed
+      if (!d.date || !d.time) return false;
+      
+      const [year, month, day] = d.date.split('-').map(Number);
+      const [hour, minute] = d.time.split(':').map(Number);
+      const dateTime = new Date(year, month - 1, day, hour, minute);
+      
+      // Check if date has passed and it still has default 'OKAY' feeling (hasn't been logged yet)
+      return dateTime < now && d.feeling === 'OKAY' && !d.diaryFeel && !d.diaryAttraction;
+    });
+    
+    // Return the most recent past scheduled date
+    if (pastScheduledDates.length > 0) {
+      pastScheduledDates.sort((a, b) => new Date(b.date) - new Date(a.date));
+      return pastScheduledDates[0];
+    }
+    
+    return null;
+  };
+
+  
   const renderContent = () => {
     if (!user) return <div className="flex items-center justify-center h-full text-rose-500">Loading...</div>;
     switch (currentView) {
+      case 'scheduled-reminder': return scheduledDateToLog ? (
+        <ScheduledDateReminderScreen 
+          scheduledDate={scheduledDateToLog} 
+          onLogDate={handleLogScheduledDate} 
+          onSkip={handleSkipScheduledDate} 
+        />
+      ) : null;
       case 'welcome': return <WelcomeScreen onAnswer={handleWelcomeAnswer} />;
       case 'main': return (
         <MainScreen 
@@ -1365,13 +1550,13 @@ export default function App() {
           onOpenAI={handleOpenAI} 
           isPremium={isPremium} 
           onUpgrade={handleUpgrade}
-          user={user} // add
-          userProfile={userProfile} // add
-          onUpdateProfile={handleUpdateProfile} // add
+          user={user}
+          userProfile={userProfile}
+          onUpdateProfile={handleUpdateProfile}
         />
       );
-      case 'add': return <DateForm onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} />;
-      case 'edit': return <DateForm initialData={selectedDate} onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} />;
+      case 'add': return <DateForm onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} existingDates={dates} />;
+      case 'edit': return <DateForm initialData={selectedDate} onSave={handleSaveDate} onCancel={() => setCurrentView('main')} onOpenAI={handleOpenAI} isPremium={isPremium} existingDates={dates} />;
       case 'detail': return selectedDate ? <DateDetail data={selectedDate} onBack={() => setCurrentView('main')} onDelete={handleDeleteDate} onEndDating={handleEndDating} onEdit={handleEdit} /> : null;
       case 'paywall': return <PremiumScreen type={paywallType} onUpgrade={handleUpgrade} onCancel={() => setCurrentView('main')} showTabs={false} dates={dates} />;
       default: return <div className="flex items-center justify-center h-full text-rose-500">Loading...</div>;
