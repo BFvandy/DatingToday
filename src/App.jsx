@@ -62,15 +62,14 @@ const SCHEDULED_THEME = { label: 'Scheduled', color: 'bg-blue-400', text: 'text-
 const SCENARIOS = [
   { id: 'coffee', label: 'Coffee Shop', icon: Coffee },
   { id: 'dinner', label: 'Dinner', icon: Utensils },
-  { id: 'walk', label: 'Walk', icon: MapPin },
   { id: 'netflix', label: 'Netflix & Chill', icon: Tv },
   { id: 'activity', label: 'Activity', icon: Zap },
 ];
 
 const TAGS = [
-  "Good conversation", "Good Fashion Taste", "Paid the bill", 
-  "Thoughtful", "Funny", "Awkward", "Red flag", "Bad manners", 
-  "Great chemistry", "Boring"
+  "Good conversation", "Good Fashion Taste", "Great chemistry", "Paid the bill", 
+  "Thoughtful", "Good looking", "Genuine", "Funny", "Awkward", "Red flag", "Bad manners", 
+  "Boring"
 ];
 
 const DATE_NUMBERS = ["First date", "Second date", "Third date", "4th+", "Relationship"];
@@ -137,7 +136,7 @@ const WelcomeScreen = ({ onAnswer }) => (
     <p className="text-gray-500 mb-12">Track, reflect, and learn from your dating life.</p>
     
     <div className="w-full max-w-sm space-y-4">
-      <p className="text-lg font-medium text-gray-700 mb-4">Have you dated today?</p>
+      <p className="text-lg font-medium text-gray-700 mb-4">Went on a date today?</p>
       <button 
         onClick={() => onAnswer(true)}
         className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-rose-600 transition-transform active:scale-95"
@@ -234,19 +233,32 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
 
   const pipelineData = useMemo(() => {
     const latestByPerson = {};
+    
+    // Find the absolute latest date for each person
     dates.forEach(d => {
       if (!d.name) return;
       const normalizedName = d.name.trim().toLowerCase();
-      if (!latestByPerson[normalizedName] || new Date(d.date) > new Date(latestByPerson[normalizedName].date)) {
+      
+      // If we haven't seen this person yet, or this date is newer
+      if (!latestByPerson[normalizedName]) {
         latestByPerson[normalizedName] = d;
+      } else {
+        const currentDate = new Date(d.date + ' ' + (d.time || '00:00'));
+        const existingDate = new Date(latestByPerson[normalizedName].date + ' ' + (latestByPerson[normalizedName].time || '00:00'));
+        
+        if (currentDate > existingDate) {
+          latestByPerson[normalizedName] = d;
+        }
       }
     });
-
+  
     const grouped = {};
     DATE_NUMBERS.forEach(stage => grouped[stage] = []);
     
+    // Only show people whose LATEST date doesn't have nextStep: 'End'
     Object.values(latestByPerson).forEach(personDate => {
-      if (personDate.nextStep === 'End') return;
+      if (personDate.nextStep === 'End') return; // Filter out ended relationships
+      
       const stage = personDate.dateNumber;
       if (grouped[stage]) {
         grouped[stage].push(personDate);
@@ -255,12 +267,13 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
         grouped['4th+'].push(personDate);
       }
     });
+    
     return grouped;
   }, [dates]);
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto pb-20">
-      <div className="bg-white px-6 pt-8 pb-4 shadow-sm flex justify-between items-center sticky top-0 z-10">
+    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto pb-16">
+      <div className="bg-white px-6 pt-6 pb-3 shadow-sm flex justify-between items-center sticky top-0 z-10">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Your Journey</h2>
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">{dates.length} MEMORIES LOGGED</p>
@@ -289,7 +302,8 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
             let colorClass = '';
             if (hasDate) {
               const d = dayDates[0];
-              if (isFutureDate(d.date, d.time)) {
+              if (isFutureDate(d.date, d.time) || !d.feeling) {
+                // Future date OR unlogged past date
                 colorClass = SCHEDULED_THEME.color;
               } else {
                 colorClass = FEELINGS[d.feeling]?.color || FEELINGS.OKAY.color;
@@ -311,7 +325,7 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
         </div>
       </div>
 
-      <div className="px-6 space-y-6 mb-6">
+      <div className="px-6 space-y-4 mb-4">
         <div className="flex items-center justify-between">
            <h3 className="text-lg font-bold text-gray-800">Active Dates</h3>
            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wide">Snapshot</span>
@@ -332,7 +346,8 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
                  <div className="space-y-3">
                     {people.map(person => {
                        const isFuture = isFutureDate(person.date, person.time);
-                       const theme = isFuture ? SCHEDULED_THEME : (FEELINGS[person.feeling] || FEELINGS.OKAY);
+                       const isUnlogged = !person.feeling;
+                       const theme = (isFuture || isUnlogged) ? SCHEDULED_THEME : (FEELINGS[person.feeling] || FEELINGS.OKAY);
                        
                        return (
                         <div key={person.id} onClick={() => onSelectDate(person)} className="flex items-center justify-between group cursor-pointer">
@@ -346,7 +361,12 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
                             </div>
                             <div>
                               <p className="font-bold text-gray-800 text-sm">{person.name}</p>
-                              <p className="text-xs text-gray-500">{new Date(person.date).toLocaleDateString()}</p>
+                              <p className="text-xs text-gray-500">
+                                {(() => {
+                                  const [year, month, day] = person.date.split('-').map(Number);
+                                  return new Date(year, month - 1, day).toLocaleDateString();
+                                })()}
+                              </p>
                             </div>
                           </div>
                           <div className={`px-2 py-1 rounded-md text-[10px] font-bold ${theme.color} bg-opacity-20 ${theme.text}`}>
@@ -367,7 +387,7 @@ const JourneyTab = ({ dates, onSelectDate, onAddDate, onOpenAI }) => {
         </div>
       </div>
 
-      <div className="fixed bottom-24 right-6 z-20">
+      <div className="fixed bottom-20 right-6 z-20">
         <button 
           onClick={onAddDate}
           className="bg-rose-500 text-white p-4 rounded-full shadow-lg shadow-rose-200 flex items-center gap-2 hover:bg-rose-600 transition-all active:scale-95"
@@ -388,7 +408,8 @@ const SummaryTab = ({ dates, onSelectDate }) => {
   const renderList = (list) => (
     list.map((d) => {
       const isFuture = isFutureDate(d.date, d.time);
-      const feeling = isFuture ? SCHEDULED_THEME : (FEELINGS[d.feeling] || FEELINGS.OKAY);
+      const isUnlogged = !d.feeling;
+      const feeling = (isFuture || isUnlogged) ? SCHEDULED_THEME : (FEELINGS[d.feeling] || FEELINGS.OKAY);
       const scenario = SCENARIOS.find(s => s.id === d.scenario) || SCENARIOS[0];
       const ScenarioIcon = scenario.icon;
       const FeelingIcon = feeling.icon;
@@ -405,7 +426,12 @@ const SummaryTab = ({ dates, onSelectDate }) => {
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start">
               <h3 className="font-bold text-gray-800 truncate pr-2">{d.name}</h3>
-              <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(d.date).toLocaleDateString()}</span>
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(d.date).toLocaleDateString()}</span>
+                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${feeling.color} bg-opacity-20 ${feeling.text} whitespace-nowrap`}>
+                  {feeling.label}
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
               <span className="flex items-center gap-1 truncate"><ScenarioIcon size={12}/> {scenario.label}</span>
@@ -420,8 +446,8 @@ const SummaryTab = ({ dates, onSelectDate }) => {
   );
 
   return (
-    <div className="h-full bg-gray-50 overflow-y-auto pb-20 pt-8">
-       <div className="px-6 mb-6">
+    <div className="h-full bg-gray-50 overflow-y-auto pb-16 pt-6">
+       <div className="px-6 mb-3">
          <h2 className="text-2xl font-bold text-gray-800">Summary</h2>
          <p className="text-sm text-gray-500">Your dating history & upcoming plans</p>
        </div>
@@ -534,7 +560,7 @@ const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
     if (confirm("Are you sure you want to log out?")) {
       try {
         await signOut(auth);
-        alert('You have been logged out.');
+        // Don't show alert, let the UI handle the transition
       } catch (e) {
         console.error("Logout error", e);
       }
@@ -699,13 +725,13 @@ const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
 
   // Regular profile view for logged-in users
   return (
-    <div className="h-full bg-gray-50 overflow-y-auto pb-20 pt-8">
-      <div className="px-6 mb-6">
+    <div className="h-full bg-gray-50 overflow-y-auto pb-16 pt-6">
+      <div className="px-6 mb-3">
         <h2 className="text-2xl font-bold text-gray-800">Profile</h2>
         <p className="text-sm text-gray-500">Manage your account</p>
       </div>
 
-      <div className="px-6 space-y-6">
+      <div className="px-6 space-y-3">
         <div className="bg-white rounded-xl p-6 shadow-sm text-center">
           <div className="w-24 h-24 mx-auto rounded-full bg-gray-100 flex items-center justify-center text-3xl mb-4 overflow-hidden border-4 border-white shadow-lg">
             {userProfile?.photo ? (
@@ -764,20 +790,31 @@ const ProfileTab = ({ user, userProfile, onUpdateProfile }) => {
 
 // 6. Add/Edit Date Form
 const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] }) => {
-  const [formData, setFormData] = useState(initialData || {
-    date: new Date().toLocaleDateString('en-CA'),
-    time: new Date().toTimeString().slice(0, 5),
-    name: '',
-    title: '',
-    link: '',
-    photo: null,
-    dateNumber: 'First date',
-    scenario: 'coffee',
-    feeling: 'OKAY',
-    tags: [],
-    diaryFeel: '',
-    diaryAttraction: '',
-    nextStep: 'Unsure'
+  const [formData, setFormData] = useState(() => {
+    if (initialData) return initialData;
+    
+    // For new dates, check if it's in the future
+    const now = new Date();
+    const defaultDate = new Date().toLocaleDateString('en-CA');
+    const defaultTime = new Date().toTimeString().slice(0, 5);
+    
+    return {
+      date: defaultDate,
+      time: defaultTime,
+      name: '',
+      title: '',
+      link: '',
+      photo: null,
+      dateNumber: 'First date',
+      scenario: 'coffee',
+      // Don't set feeling, tags, diary, or nextStep - let them be undefined for future dates
+      // They'll only be set when the user actually logs the date
+      feeling: undefined,
+      tags: [],
+      diaryFeel: '',
+      diaryAttraction: '',
+      nextStep: undefined
+    };
   });
 
   const [showDropdown, setShowDropdown] = useState(false);
@@ -975,7 +1012,7 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] 
           <h3 className="flex items-center gap-2 font-semibold text-gray-800">
             <MapPin size={18} className="text-rose-500" /> Scenario
           </h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {SCENARIOS.map(s => {
               const Icon = s.icon;
               const isSelected = formData.scenario === s.id;
@@ -984,10 +1021,10 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] 
                   key={s.id}
                   type="button"
                   onClick={() => setFormData({...formData, scenario: s.id})}
-                  className={`flex flex-col items-center p-3 rounded-lg border w-20 h-20 justify-center gap-1 transition-all ${isSelected ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-gray-100 text-gray-400'}`}
+                  className={`flex flex-col items-center p-3 rounded-lg border h-20 justify-center gap-1 transition-all ${isSelected ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-gray-100 text-gray-400'}`}
                 >
                   <Icon size={20} />
-                  <span className="text-[10px] font-medium leading-tight">{s.label}</span>
+                  <span className="text-[10px] font-medium leading-tight text-center">{s.label}</span>
                 </button>
               )
             })}
@@ -1000,9 +1037,9 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] 
               <Heart size={18} className="text-rose-500" /> Overall Feeling
             </h3>
             <div className="grid grid-cols-5 gap-2">
-              {Object.keys(FEELINGS).map(key => {
-                const f = FEELINGS[key];
-                const isSelected = formData.feeling === key;
+            {Object.keys(FEELINGS).map(key => {
+  const f = FEELINGS[key];
+  const isSelected = formData.feeling === key || (!formData.feeling && key === 'OKAY'); // Default to OKAY visually, but don't save it
                 const FeelingIcon = f.icon;
                 return (
                   <button
@@ -1046,8 +1083,8 @@ const DateForm = ({ initialData, onSave, onCancel, onOpenAI, existingDates = [] 
               <ArrowRight size={18} className="text-rose-500" /> Next Step
             </h3>
             <div className="grid grid-cols-3 gap-2">
-              {NEXT_STEPS.map(step => {
-                 const isSelected = formData.nextStep === step.id;
+            {NEXT_STEPS.map(step => {
+   const isSelected = formData.nextStep === step.id || (!formData.nextStep && step.id === 'Unsure'); // Default to Unsure visually, but don't save it
                  const StepIcon = step.icon;
                  return (
                    <button
@@ -1296,7 +1333,7 @@ const MainScreen = ({
         {activeTab === 'expert' && <PremiumScreen type="expert" onUpgrade={onUpgrade} showTabs={true} dates={dates} />}
         {activeTab === 'profile' && <ProfileTab user={user} userProfile={userProfile} onUpdateProfile={onUpdateProfile} />}
       </div>
-      <div className="h-20 bg-white border-t border-gray-100 flex items-center justify-around px-2 z-30 pb-2">
+      <div className="h-16 bg-white border-t border-gray-100 flex items-center justify-around px-2 z-30">
         <button onClick={() => onTabChange('journey')} className={`flex flex-col items-center p-2 rounded-lg transition-colors w-16 ${activeTab === 'journey' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}>
           <Home size={24} className="mb-1" strokeWidth={activeTab === 'journey' ? 2.5 : 2} />
           <span className="text-[10px] font-medium">Journey</span>
@@ -1349,16 +1386,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const initAuth = async () => {
-      await signInAnonymously(auth);
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        // User is signed in (either anonymous or email)
+        setUser(currentUser);
+      } else {
+        // No user - sign in anonymously
+        signInAnonymously(auth).catch(error => {
+          console.error("Anonymous sign-in failed:", error);
+        });
+      }
+    });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      // When there's no user, reset to loading state
+      setCurrentView('loading');
+      setDates([]);
+      return;
+    }
+    
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'dates'), orderBy('date', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const datesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -1411,20 +1460,24 @@ export default function App() {
          const { id, ...data } = formData;
          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'dates', id), {
            ...data,
+           reminderShown: true,  // NEW: Mark reminder as shown when user logs the date
            updatedAt: serverTimestamp()
          });
          setCurrentView('main');
        } catch (e) { console.error("Error updating date", e); }
        return;
     }
-    if (!isPremium && dates.length >= 10) {
-      setPaywallType('limit');
-      setCurrentView('paywall');
-      return; 
-    }
     try {
+      // Only save fields that are actually set (not undefined)
+      const dataToSave = Object.entries(formData).reduce((acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = value;
+        }
+        return acc;
+      }, {});
+      
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'dates'), {
-        ...formData,
+        ...dataToSave,
         createdAt: serverTimestamp()
       });
       setCurrentView('main');
@@ -1495,7 +1548,18 @@ export default function App() {
     setCurrentView('edit'); // Use 'edit' view to pre-fill the form
   };
   
-  const handleSkipScheduledDate = () => {
+  const handleSkipScheduledDate = async () => {
+    // Mark this date's reminder as shown so it doesn't appear again
+    if (scheduledDateToLog?.id) {
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'dates', scheduledDateToLog.id), {
+          reminderShown: true
+        });
+      } catch (e) {
+        console.error("Error marking reminder as shown", e);
+      }
+    }
+    
     setScheduledDateToLog(null);
     setCurrentView('main');
   };
@@ -1503,31 +1567,51 @@ export default function App() {
 
   // add for date reminder welcome page
   const checkForPastScheduledDates = (datesData) => {
-    // Find scheduled dates that have now passed
     const now = new Date();
+    console.log('🔍 Checking for past scheduled dates...');
+    console.log('Current time:', now);
+    console.log('Total dates:', datesData.length);
+    
     const pastScheduledDates = datesData.filter(d => {
-      // Must be a scheduled date (was in the future when created)
-      // And must have a feeling of 'OKAY' still (meaning it hasn't been updated after the date)
-      // And the date has now passed
       if (!d.date || !d.time) return false;
       
       const [year, month, day] = d.date.split('-').map(Number);
       const [hour, minute] = d.time.split(':').map(Number);
       const dateTime = new Date(year, month - 1, day, hour, minute);
       
-      // Check if date has passed and it still has default 'OKAY' feeling (hasn't been logged yet)
-      return dateTime < now && d.feeling === 'OKAY' && !d.diaryFeel && !d.diaryAttraction;
+      console.log('Checking date:', {
+        name: d.name,
+        dateTime: dateTime,
+        hasPassed: dateTime < now,
+        feeling: d.feeling,
+        nextStep: d.nextStep,
+        reminderShown: d.reminderShown,
+        notLogged: !d.feeling && !d.nextStep,
+        reminderNotShown: !d.reminderShown
+      });
+      
+      const hasPassed = dateTime < now;
+      const notLogged = !d.feeling && !d.nextStep;
+      const reminderNotShown = !d.reminderShown;
+      
+      return hasPassed && notLogged && reminderNotShown;
     });
+    
+    console.log('Found past scheduled dates:', pastScheduledDates.length);
+    if (pastScheduledDates.length > 0) {
+      console.log('Past scheduled dates:', pastScheduledDates);
+    }
     
     // Return the most recent past scheduled date
     if (pastScheduledDates.length > 0) {
       pastScheduledDates.sort((a, b) => new Date(b.date) - new Date(a.date));
+      console.log('✅ Returning scheduled date:', pastScheduledDates[0]);
       return pastScheduledDates[0];
     }
     
+    console.log('❌ No past scheduled dates found');
     return null;
   };
-
   
   const renderContent = () => {
     if (!user) return <div className="flex items-center justify-center h-full text-rose-500">Loading...</div>;
