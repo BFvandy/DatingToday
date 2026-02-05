@@ -8,6 +8,7 @@ import {
   TrendingUp, Activity
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
+import { getAnalytics, logEvent } from 'firebase/analytics';
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -47,6 +48,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'dating-today';
+const analytics = getAnalytics(app);
+
 
 // --- Constants & Helpers ---
 const FEELINGS = {
@@ -176,7 +179,10 @@ const ScheduledDateReminderScreen = ({ scheduledDate, onLogDate, onSkip }) => (
           <h3 className="text-xl font-bold text-gray-800">{scheduledDate.name}</h3>
           {scheduledDate.title && <p className="text-sm text-gray-500">{scheduledDate.title}</p>}
           <p className="text-sm text-blue-600 mt-1">
-            {new Date(scheduledDate.date).toLocaleDateString()} at {scheduledDate.time}
+            {(() => {
+              const [year, month, day] = scheduledDate.date.split('-').map(Number);
+              return new Date(year, month - 1, day).toLocaleDateString();
+            })()} at {scheduledDate.time}
           </p>
         </div>
       </div>
@@ -427,7 +433,12 @@ const SummaryTab = ({ dates, onSelectDate }) => {
             <div className="flex justify-between items-start">
               <h3 className="font-bold text-gray-800 truncate pr-2">{d.name}</h3>
               <div className="flex flex-col items-end gap-1">
-                <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(d.date).toLocaleDateString()}</span>
+              <span className="text-xs text-gray-400 whitespace-nowrap">
+                {(() => {
+                  const [year, month, day] = d.date.split('-').map(Number);
+                  return new Date(year, month - 1, day).toLocaleDateString();
+                })()}
+              </span>
                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${feeling.color} bg-opacity-20 ${feeling.text} whitespace-nowrap`}>
                   {feeling.label}
                 </span>
@@ -1186,9 +1197,14 @@ const DateDetail = ({ data, onBack, onDelete, onEndDating, onEdit }) => {
           <h1 className="text-2xl font-bold text-gray-900">{data.name}</h1>
           <p className="text-indigo-600 font-medium">{data.title}</p>
           <div className="flex justify-center gap-2 text-sm text-gray-500">
-             <span>{new Date(data.date).toLocaleDateString()}</span>
-             <span>•</span>
-             <span>{data.dateNumber}</span>
+            <span>
+              {(() => {
+                const [year, month, day] = data.date.split('-').map(Number);
+                return new Date(year, month - 1, day).toLocaleDateString();
+              })()}
+            </span>
+            <span>•</span>
+            <span>{data.dateNumber}</span>
           </div>
         </div>
 
