@@ -1,5 +1,7 @@
 # Dating Today Web app
 
+A personal tool to help you track, reflect, and learn from your dating experiences. Keep a private journal of your dates, spot patterns, and date more mindfully.
+
 <img width="1593" height="1116" alt="Welcome Page" src="https://github.com/user-attachments/assets/187b0a76-d75c-45b0-b9c3-2db1b37c661f" />
 
 ## Core Features
